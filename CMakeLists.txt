@@ -12,4 +12,8 @@ add_executable(dahdit
         src/morse.c
         src/util.c
         src/diag.c
+        include/lexer.h
+        include/parser.h
+        include/interp.h
+        include/symtab.h
 )
