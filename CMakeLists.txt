@@ -11,4 +11,5 @@ add_executable(dahdit
         src/engine.c
         src/morse.c
         src/util.c
+        include/morse_table.h
 )
