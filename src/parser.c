@@ -80,7 +80,7 @@ static bool parse_factor(Parser* ps, Expr* expr) {
         if (!isdigit((unsigned char)word[i])) { all_digits = false; break; }
     }
 
-    if (all_digits) {
+    if (all_digits && word[0] != '\0') {
         int32_t value = (int32_t)strtol(word, NULL, 10);
         return expr_push_number(ps, expr, value);
     }
