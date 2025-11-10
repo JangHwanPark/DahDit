@@ -1,7 +1,6 @@
 #ifndef INTERP_H
 #define INTERP_H
-#include "parser.h"
-#include "symtab.h"
+#pragma once
 #include <stdbool.h>
 
 bool run_program(const char* filename);

@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "parser.h"
+#include "symtab.h"
+
 static bool eval_expr(const Expr* expr, SymTab* st, const char* filename, int line, int col, int32_t* out) {
     int32_t stack[MAX_EXPR_ITEMS];
     int sp = 0;
