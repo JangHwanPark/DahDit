@@ -45,6 +45,9 @@ static bool eval_expr(const Expr* expr, SymTab* st, const char* filename, int li
                     result = lhs + rhs;
                 } else if (item.as.op == EXPR_OP_SUB) {
                     result = lhs - rhs;
+                } else {
+                    diag_error(filename, line, col, "unknown operator in expression");
+                    return false;
                 }
                 stack[sp++] = result;
                 break;
