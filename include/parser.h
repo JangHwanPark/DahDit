@@ -9,20 +9,41 @@ typedef enum {
     STMT_VAR
 } StmtKind;
 
-// PRINT 리터럴/식별자
+typedef enum {
+    EXPR_ITEM_NUMBER,
+    EXPR_ITEM_VAR,
+    EXPR_ITEM_OP,
+} ExprItemKind;
+
+typedef enum {
+    EXPR_OP_ADD,
+    EXPR_OP_SUB,
+} ExprOp;
+
 typedef struct {
-    bool is_var;      // true면 varName 사용, false면 literal 사용
-    char varName[64]; // is_var=true일 때
-    // literal: 여러 단어(문자열)의 개수와 내용
-    int literal_word_count;
-    char literal_words[16][64]; // 단어 최대 16, 각 단어 63자 제한
+    ExprItemKind kind;
+    union {
+        int32_t number;
+        char var[64];
+        ExprOp op;
+    } as;
+} ExprItem;
+
+#define MAX_EXPR_ITEMS 64
+
+typedef struct {
+    ExprItem items[MAX_EXPR_ITEMS];
+    int count;
+} Expr;
+
+typedef struct {
+    Expr expr;
 } PrintStmt;
 
-// VAR name = number ;
 typedef struct {
     char name[64];
-    int32_t value;
     bool has_value;
+    Expr value_expr;
 } VarStmt;
 
 typedef struct {

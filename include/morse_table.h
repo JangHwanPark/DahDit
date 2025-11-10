@@ -16,6 +16,8 @@ static const MorseEntry MORSE_TABLE[] = {
     // Digits
     {"-----", '0'}, {".----", '1'}, {"..---", '2'}, {"...--", '3'}, {"....-", '4'},
     {".....", '5'}, {"-....", '6'}, {"--...", '7'}, {"---..", '8'}, {"----.", '9'},
+    // Operators
+    {".-.-.", '+'}, {"-....-", '-'},
 };
 
 static const int MORSE_TABLE_LEN = sizeof(MORSE_TABLE)/sizeof(MORSE_TABLE[0]);

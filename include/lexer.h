@@ -8,6 +8,8 @@ typedef enum {
     TK_LETTER,   // payload: single char 'A'..'Z','0'..'9'
     TK_SLASH,    // '/'
     TK_EQ,       // '='
+    TK_PLUS,     // '+'
+    TK_MINUS,    // '-'
     TK_SEMI,     // ';'
     TK_NEWLINE,  // '\n' (문장 경계 힌트용. 파서는 무시 가능)
 } TokenKind;

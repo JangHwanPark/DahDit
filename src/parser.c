@@ -2,6 +2,7 @@
 #include "diag.h"
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 static void advance(Parser* ps) { ps->cur = lx_next(ps->lx); }
 
@@ -18,8 +19,8 @@ static bool parse_word(Parser* ps, char* out, int outsz) {
     return n > 0;
 }
 
-static void skip_newlines(Parser* ps) {
-    while (ps->cur.kind == TK_NEWLINE) advance(ps);
+static void skip_separators(Parser* ps) {
+    while (ps->cur.kind == TK_NEWLINE || ps->cur.kind == TK_SLASH) advance(ps);
 }
 
 static bool is_kw(const char* w, const char* kw) {
@@ -31,125 +32,128 @@ void ps_init(Parser* ps, Lexer* lx) {
     ps->cur = lx_next(lx);
 }
 
-// PRINT <words or var> ;
-static bool parse_print(Parser* ps, Stmt* out) {
-    out->kind = STMT_PRINT;
-    out->printStmt.is_var = false;
-    out->printStmt.literal_word_count = 0;
-    out->line = ps->cur.line; out->col = ps->cur.col;
-
-    // 다음 토큰부터 ';' 전까지를 수집
-    // 단어는 LETTER들의 모음, 단어 사이 '/'가 나오면 공백으로 이어짐
-    // 케이스1: 첫 단어가 변수명이고 그 다음이 바로 ';'라면 변수 출력
-    // 케이스2: 하나 이상의 단어/슬래시가 있으면 리터럴 출력
-    char first[64] = {0};
-
-    // 최소 한 단어 필요
-    if (ps->cur.kind != TK_LETTER) {
-        diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expected letters after PRINT");
+static bool expr_push_number(Parser* ps, Expr* expr, int32_t value) {
+    if (expr->count >= MAX_EXPR_ITEMS) {
+        diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expression too long");
         return false;
     }
-    // 첫 단어
-    if (!parse_word(ps, first, sizeof(first))) return false;
+    expr->items[expr->count].kind = EXPR_ITEM_NUMBER;
+    expr->items[expr->count].as.number = value;
+    expr->count++;
+    return true;
+}
 
-    // 이어지는 부분을 살핀다
-    int wc = 0;
-    int pending_space = 0; // '/'를 만나면 다음 단어 앞에 공백 의미
-    while (ps->cur.kind != TK_SEMI && ps->cur.kind != TK_EOF) {
-        if (ps->cur.kind == TK_SLASH) {
-            pending_space = 1; advance(ps); continue;
-        } else if (ps->cur.kind == TK_LETTER) {
-            // 새 단어 시작
-            char w[64] = {0};
-            if (!parse_word(ps, w, sizeof(w))) break;
-            if (wc < 16) {
-                if (pending_space && wc > 0) {
-                    // 이전 단어와의 구분은 출력 단계에서 공백으로 처리
-                }
-                strncpy(out->printStmt.literal_words[wc], w, 63);
-                out->printStmt.literal_words[wc][63] = '\0';
-                wc++;
-                pending_space = 0;
-            }
-        } else if (ps->cur.kind == TK_NEWLINE) {
+static bool expr_push_var(Parser* ps, Expr* expr, const char* name) {
+    if (expr->count >= MAX_EXPR_ITEMS) {
+        diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expression too long");
+        return false;
+    }
+    expr->items[expr->count].kind = EXPR_ITEM_VAR;
+    strncpy(expr->items[expr->count].as.var, name, sizeof(expr->items[expr->count].as.var));
+    expr->items[expr->count].as.var[sizeof(expr->items[expr->count].as.var)-1] = '\0';
+    expr->count++;
+    return true;
+}
+
+static bool expr_push_op(Parser* ps, Expr* expr, ExprOp op) {
+    if (expr->count >= MAX_EXPR_ITEMS) {
+        diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expression too long");
+        return false;
+    }
+    expr->items[expr->count].kind = EXPR_ITEM_OP;
+    expr->items[expr->count].as.op = op;
+    expr->count++;
+    return true;
+}
+
+static bool parse_factor(Parser* ps, Expr* expr) {
+    skip_separators(ps);
+    if (ps->cur.kind != TK_LETTER) {
+        diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expected number or identifier in expression");
+        return false;
+    }
+    char word[64] = {0};
+    if (!parse_word(ps, word, sizeof(word))) return false;
+
+    bool all_digits = true;
+    for (int i = 0; word[i]; ++i) {
+        if (!isdigit((unsigned char)word[i])) { all_digits = false; break; }
+    }
+
+    if (all_digits) {
+        int32_t value = (int32_t)strtol(word, NULL, 10);
+        return expr_push_number(ps, expr, value);
+    }
+
+    return expr_push_var(ps, expr, word);
+}
+
+static bool parse_expr(Parser* ps, Expr* expr) {
+    expr->count = 0;
+    if (!parse_factor(ps, expr)) return false;
+
+    for (;;) {
+        skip_separators(ps);
+        if (ps->cur.kind == TK_PLUS || ps->cur.kind == TK_MINUS) {
+            TokenKind op_kind = ps->cur.kind;
             advance(ps);
-        } else if (ps->cur.kind == TK_EQ) {
-            diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "unexpected '=' in PRINT");
-            return false;
+            if (!parse_factor(ps, expr)) return false;
+            ExprOp op = (op_kind == TK_PLUS) ? EXPR_OP_ADD : EXPR_OP_SUB;
+            if (!expr_push_op(ps, expr, op)) return false;
         } else {
-            // 기타 토큰 만나면 루프 종료
             break;
         }
     }
+    return true;
+}
 
-    // 만약 추가 단어가 하나도 없었고, 바로 ';'이면 → 변수 출력으로 간주
-    if (wc == 0) {
-        out->printStmt.is_var = true;
-        strncpy(out->printStmt.varName, first, 63);
-    } else {
-        // literal 모드: 첫 단어를 배열 맨 앞에 넣기
-        out->printStmt.is_var = false;
-        strncpy(out->printStmt.literal_words[0], first, 63);
-        wc += 1;
-    }
-    out->printStmt.literal_word_count = wc == 0 ? 0 : wc;
+// PRINT <expr> ;
+static bool parse_print(Parser* ps, Stmt* out) {
+    out->kind = STMT_PRINT;
+    out->line = ps->cur.line; out->col = ps->cur.col;
+    if (!parse_expr(ps, &out->printStmt.expr)) return false;
 
-    // 세미콜론 필수
+    skip_separators(ps);
     if (ps->cur.kind != TK_SEMI) {
         diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "missing ';' after PRINT");
         return false;
     }
-    advance(ps); // eat ';'
+    advance(ps);
     return true;
 }
 
-// VAR name (= number)? ;
+// VAR name (= expr)? ;
 static bool parse_var(Parser* ps, Stmt* out) {
     out->kind = STMT_VAR;
     out->varStmt.name[0] = '\0';
-    out->varStmt.value = 0;
     out->varStmt.has_value = false;
     out->line = ps->cur.line; out->col = ps->cur.col;
 
-    // 식별자
+    skip_separators(ps);
     if (ps->cur.kind != TK_LETTER) {
         diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expected identifier after VAR");
         return false;
     }
     if (!parse_word(ps, out->varStmt.name, sizeof(out->varStmt.name))) return false;
 
-    // '='?
+    skip_separators(ps);
     if (ps->cur.kind == TK_EQ) {
         advance(ps);
-        // 숫자(연속 LETTER이지만 실제로는 '0'~'9')
-        if (ps->cur.kind != TK_LETTER) {
-            diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expected number after '='");
-            return false;
-        }
-        char numbuf[64] = {0};
-        if (!parse_word(ps, numbuf, sizeof(numbuf))) return false;
-
-        // 숫자 확인
-        for (int i=0; numbuf[i]; ++i) {
-            if (!isdigit((unsigned char)numbuf[i])) {
-                diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "number must be digits 0-9");
-                return false;
-            }
-        }
-        out->varStmt.value = (int32_t)strtol(numbuf, NULL, 10);
+        if (!parse_expr(ps, &out->varStmt.value_expr)) return false;
         out->varStmt.has_value = true;
     }
 
+    skip_separators(ps);
     if (ps->cur.kind != TK_SEMI) {
         diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "missing ';' after VAR statement");
         return false;
     }
-    advance(ps); // eat ';'
+    advance(ps);
     return true;
 }
 
 bool ps_next_stmt(Parser* ps, Stmt* out) {
-    skip_newlines(ps);
+    skip_separators(ps);
     if (ps->cur.kind == TK_EOF) return false;
 
     // 첫 단어(키워드) 읽기

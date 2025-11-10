@@ -73,8 +73,14 @@ Token lx_next(Lexer* lx) {
             tok.kind = TK_LETTER; tok.ch = '?';
             return tok;
         }
-        tok.kind = TK_LETTER;
-        tok.ch = ch;
+        if (ch == '+') {
+            tok.kind = TK_PLUS;
+        } else if (ch == '-') {
+            tok.kind = TK_MINUS;
+        } else {
+            tok.kind = TK_LETTER;
+            tok.ch = ch;
+        }
         return tok;
     }
 
