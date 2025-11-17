@@ -1,0 +1,15 @@
+# VAR A = 1 ;
+...- .- .-. / .- = .---- ;
+# VAR B = 2 ;
+...- .- .-. / -... = ..--- ;
+# VAR C = A + B ;
+...- .- .-. / -.-. = .- .-.-. -... ;
+
+# PRINT C = A + B ; (should render as native string)
+.--. .-. .. -. - / -.-. = .- .-.-. -... ;
+
+# PRINT C = A + B ; (should render as raw token string)
+.--. .-. .. -. - / -.-. / -...- / .- .-.-. -... ;
+
+# PRINT C + B - A ; (numeric result 4)
+.--. .-. .. -. - / -.-. .-.-. -... -....- .- ;
