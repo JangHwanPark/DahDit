@@ -93,3 +93,6 @@ Dahdit은 문자열 출력을 두 가지 방식으로 지원합니다.
 .--. .-. .. -. - / "HELLO WORLD" ;
 # 출력: HELLO WORLD
 ```
+
+## License
+이 프로젝트는 **MIT License**를 따릅니다. 자세한 내용은 [`LICENSE`](LICENSE) 파일을 참조하십시오.
