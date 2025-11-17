@@ -126,10 +126,10 @@ static bool handle_statement(const Stmt* s, SymTab* st, const char* filename) {
         }
 
         case STMT_PRINT_STR: {
+            printf("%s\n", s->printStrStmt.text);
             // (미구현) 향후 문자열 출력 시 사용될 예정
             // 현재는 TK_STRING 토큰을 Lexer/Parser에서 건네주지 않으므로 실행되지 않음.
-            // printf("%s\n", s->printStrStmt.text);
-            diag_error(filename, s->line, s->col, "String output is not supported yet");
+            // diag_error(filename, s->line, s->col, "String output is not supported yet");
             break;
         }
 

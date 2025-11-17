@@ -129,6 +129,8 @@ Token lx_next(Lexer* lx) {
             tok.kind = TK_STAR;
         } else if (ch == '%') {
             tok.kind = TK_PERCENT;
+        } else if (ch == '=') {
+            tok.kind = TK_EQ;
         } else if (ch == '/') {
             //========================================
             // '/'는 TK_SLASH 토큰으로 처리되어야 하지만,

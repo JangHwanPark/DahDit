@@ -201,10 +201,68 @@ static bool parse_print(Parser* ps, Stmt* out) {
         advance(ps);
     }
 
-    // 정수 출력 (STMT_PRINT - 표현식 파싱)
     else {
         out->kind = STMT_PRINT;
         if (!parse_expr(ps, &out->printStmt.expr)) return false;
+
+        skip_separators(ps);
+
+        // PRINT 뒤에 여러 단어(예: HELLO WORLD)가 오는 경우
+        // 기존 표현식 파싱은 첫 단어만 소비하고 세미콜론을 기대하므로 오류가 발생함.
+        // 표현식이 단일 토큰이며, 이후에 단어/슬래시가 더 이어지면 문자열 출력으로 간주.
+        if (ps->cur.kind != TK_SEMI &&
+            out->printStmt.expr.count == 1 &&
+            (ps->cur.kind == TK_LETTER || ps->cur.kind == TK_SLASH || ps->cur.kind == TK_NEWLINE)) {
+
+            char buffer[sizeof(out->printStrStmt.text)] = {0};
+
+            // 1) 표현식의 첫 항을 문자열로 복원
+            ExprItem first = out->printStmt.expr.items[0];
+            if (first.kind == EXPR_ITEM_NUMBER) {
+                snprintf(buffer, sizeof(buffer), "%d", first.as.number);
+            } else if (first.kind == EXPR_ITEM_VAR) {
+                strncpy(buffer, first.as.var, sizeof(buffer) - 1);
+                buffer[sizeof(buffer) - 1] = '\0';
+            }
+
+            // 2) 남은 토큰을 세미콜론 전까지 이어 붙이며 공백을 삽입
+            bool pending_space = buffer[0] != '\0';
+            while (ps->cur.kind != TK_SEMI && ps->cur.kind != TK_EOF) {
+                size_t len = strlen(buffer);
+
+                if (pending_space && len > 0 && buffer[len - 1] != ' ' && ps->cur.kind == TK_LETTER) {
+                    if (len + 1 < sizeof(buffer)) {
+                        buffer[len] = ' ';
+                        buffer[len + 1] = '\0';
+                        len++;
+                    }
+                    pending_space = false;
+                }
+
+                if (ps->cur.kind == TK_LETTER) {
+                    if (len + 1 < sizeof(buffer)) {
+                        buffer[len] = ps->cur.ch;
+                        buffer[len + 1] = '\0';
+                    }
+                } else if (ps->cur.kind == TK_SLASH || ps->cur.kind == TK_NEWLINE) {
+                    pending_space = buffer[0] != '\0';
+                } else {
+                    // 예상치 못한 토큰이 나오면 중단 (이후에서 오류 처리)
+                    break;
+                }
+                advance(ps);
+            }
+
+            if (ps->cur.kind != TK_SEMI) {
+                diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "missing ';' after PRINT");
+                return false;
+            }
+
+            // 문자열 출력으로 전환
+            out->kind = STMT_PRINT_STR;
+            strncpy(out->printStrStmt.text, buffer, sizeof(out->printStrStmt.text));
+            out->printStrStmt.text[sizeof(out->printStrStmt.text) - 1] = '\0';
+        }
     }
 
     skip_separators(ps);
