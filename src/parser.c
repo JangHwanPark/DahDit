@@ -138,17 +138,18 @@ static bool parse_term(Parser* ps, Expr* expr) {
 
     for (;;) {
         skip_separators(ps);
-        if (ps->cur.kind == TK_STAR || ps->cur.kind == TK_PERCENT) {
+        if (ps->cur.kind == TK_STAR || ps->cur.kind == TK_PERCENT || ps->cur.kind == TK_DIV) {
             TokenKind op_kind = ps->cur.kind;
             advance(ps);
 
-            // 다음 Term을 파싱하고 푸시 (수정된 부분)
+            // 다음 Term을 파싱하고 푸시
             if (!parse_factor(ps, expr)) return false;
 
             // 연산자 푸시 (RPN 스타일)
             ExprOp op;
             if (op_kind == TK_STAR) op = EXPR_OP_MUL;
-            else op = EXPR_OP_MOD;
+            else if (op_kind == TK_PERCENT) op = EXPR_OP_MOD;
+            else op = EXPR_OP_DIV;
 
             if (!expr_push_op(ps, expr, op)) return false;
         } else {
@@ -207,30 +208,40 @@ static bool parse_print(Parser* ps, Stmt* out) {
 
         skip_separators(ps);
 
-        // PRINT 뒤에 여러 단어(예: HELLO WORLD)가 오는 경우
-        // 기존 표현식 파싱은 첫 단어만 소비하고 세미콜론을 기대하므로 오류가 발생함.
-        // 표현식이 단일 토큰이며, 이후에 단어/슬래시가 더 이어지면 문자열 출력으로 간주.
-        if (ps->cur.kind != TK_SEMI &&
-            out->printStmt.expr.count == 1 &&
-            (ps->cur.kind == TK_LETTER || ps->cur.kind == TK_SLASH || ps->cur.kind == TK_NEWLINE)) {
+        // PRINT 뒤에 여러 단어(예: HELLO WORLD)나 연산자가 이어지는 경우 문자열로 간주.
+        // 기존 표현식 파서는 미지원 토큰에서 멈추므로, 세미콜론을 발견할 때까지 문자열을 수집한다.
+        if (ps->cur.kind != TK_SEMI) {
 
             char buffer[sizeof(out->printStrStmt.text)] = {0};
 
-            // 1) 표현식의 첫 항을 문자열로 복원
-            ExprItem first = out->printStmt.expr.items[0];
-            if (first.kind == EXPR_ITEM_NUMBER) {
-                snprintf(buffer, sizeof(buffer), "%d", first.as.number);
-            } else if (first.kind == EXPR_ITEM_VAR) {
-                strncpy(buffer, first.as.var, sizeof(buffer) - 1);
-                buffer[sizeof(buffer) - 1] = '\0';
+            // 1) 이미 파싱된 표현식 토큰을 문자열로 복원(RPN이지만 문자열에서는 토큰 순서를 보존)
+            size_t len = 0;
+            for (int i = 0; i < out->printStmt.expr.count && len < sizeof(buffer) - 1; ++i) {
+                if (len > 0 && len + 1 < sizeof(buffer)) buffer[len++] = ' ';
+
+                ExprItem item = out->printStmt.expr.items[i];
+                if (item.kind == EXPR_ITEM_NUMBER) {
+                    len += (size_t)snprintf(buffer + len, sizeof(buffer) - len, "%d", item.as.number);
+                } else if (item.kind == EXPR_ITEM_VAR) {
+                    strncpy(buffer + len, item.as.var, sizeof(buffer) - len - 1);
+                    len = strlen(buffer);
+                } else if (item.kind == EXPR_ITEM_OP) {
+                    char op = (item.as.op == EXPR_OP_ADD) ? '+' :
+                              (item.as.op == EXPR_OP_SUB) ? '-' :
+                              (item.as.op == EXPR_OP_MUL) ? '*' :
+                              (item.as.op == EXPR_OP_DIV) ? '/' : '%';
+                    buffer[len++] = op;
+                    buffer[len] = '\0';
+                }
             }
 
             // 2) 남은 토큰을 세미콜론 전까지 이어 붙이며 공백을 삽입
             bool pending_space = buffer[0] != '\0';
             while (ps->cur.kind != TK_SEMI && ps->cur.kind != TK_EOF) {
-                size_t len = strlen(buffer);
+                len = strlen(buffer);
 
-                if (pending_space && len > 0 && buffer[len - 1] != ' ' && ps->cur.kind == TK_LETTER) {
+                // 공백 삽입이 필요한 상황이면 추가
+                if (pending_space && len > 0 && buffer[len - 1] != ' ') {
                     if (len + 1 < sizeof(buffer)) {
                         buffer[len] = ' ';
                         buffer[len + 1] = '\0';
@@ -244,12 +255,27 @@ static bool parse_print(Parser* ps, Stmt* out) {
                         buffer[len] = ps->cur.ch;
                         buffer[len + 1] = '\0';
                     }
+                } else if (ps->cur.kind == TK_PLUS || ps->cur.kind == TK_MINUS ||
+                           ps->cur.kind == TK_STAR || ps->cur.kind == TK_PERCENT || ps->cur.kind == TK_DIV ||
+                           ps->cur.kind == TK_EQ) {
+                    // 연산자는 앞에 공백을 보장하고, 다음 토큰 앞에도 공백을 기대
+                    if (len > 0 && buffer[len - 1] != ' ' && len + 1 < sizeof(buffer)) {
+                        buffer[len++] = ' ';
+                    }
+                    if (len + 1 < sizeof(buffer)) {
+                        char op = (ps->cur.kind == TK_PLUS) ? '+' :
+                                  (ps->cur.kind == TK_MINUS) ? '-' :
+                                  (ps->cur.kind == TK_STAR) ? '*' :
+                                  (ps->cur.kind == TK_DIV) ? '/' :
+                                  (ps->cur.kind == TK_PERCENT) ? '%' : '=';
+                        buffer[len] = op;
+                        buffer[len + 1] = '\0';
+                    }
+                    pending_space = true;
                 } else if (ps->cur.kind == TK_SLASH || ps->cur.kind == TK_NEWLINE) {
                     pending_space = buffer[0] != '\0';
-                } else {
-                    // 예상치 못한 토큰이 나오면 중단 (이후에서 오류 처리)
-                    break;
                 }
+
                 advance(ps);
             }
 

@@ -21,6 +21,7 @@ typedef enum {
     TK_PLUS,    // '+' (덧셈)
     TK_MINUS,   // '-' (뺄셈)
     TK_STAR,    // '*' (곱셈)
+    TK_DIV,     // '/' (나눗셈)
     TK_PERCENT, // '%' (나머지 연산)
 
     // 구분자 및 구문 종결자

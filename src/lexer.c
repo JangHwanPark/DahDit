@@ -58,6 +58,14 @@ static void skip_ws_and_comments(Lexer* lx) {
  * @brief 모스 부호 시퀀스(code)를 해당하는 단일 문자(char)로 디코딩
  */
 static char decode_morse(const char* code) {
+    // 연산자와 '='는 동일한 모스 부호를 쓰는 알파벳보다 항상 우선한다.
+    if (strcmp(code, ".-.-.") == 0) return '+';   // +
+    if (strcmp(code, "-....-") == 0) return '-';  // -
+    if (strcmp(code, "-.-") == 0) return '*';     // * (K와 충돌)
+    if (strcmp(code, "-..-.") == 0) return '/';   // /
+    if (strcmp(code, "...-.-") == 0) return '%';  // %
+    if (strcmp(code, "-...-") == 0) return '=';   // =
+
     for (int i = 0; i < MORSE_TABLE_LEN; ++i) {
         if (strcmp(MORSE_TABLE[i].code, code) == 0) return MORSE_TABLE[i].ch;
     }
@@ -132,14 +140,7 @@ Token lx_next(Lexer* lx) {
         } else if (ch == '=') {
             tok.kind = TK_EQ;
         } else if (ch == '/') {
-            //========================================
-            // '/'는 TK_SLASH 토큰으로 처리되어야 하지만,
-            // 모스 부호 테이블에서는 '/'를 나눗셈으로 사용할 수 있으므로,
-            // 현재는 TK_LETTER로 처리하거나, 별도 TK_DIV 토큰으로 분류 필요.
-            // (현재 TK_DIV 토큰은 없으므로 TK_LETTER로 처리 후 Parser가 처리하게 둠)
-            // 일단 일반 문자로 분류 후 Parser가 처리하도록 함
-            //========================================
-            tok.kind = TK_LETTER;
+            tok.kind = TK_DIV;
             tok.ch = ch;
         } else {
             //========================================
