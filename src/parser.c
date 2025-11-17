@@ -1,13 +1,25 @@
+//========================================
+// System Includes
+//========================================
 #include "parser.h"
 #include "diag.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
 
+//========================================
+// Utility Functions
+//========================================
+
+/**
+ * @brief 현재 토큰을 한 칸 앞으로 이동
+ */
 static void advance(Parser* ps) { ps->cur = lx_next(ps->lx); }
 
-// 연속 LETTER를 모아 하나의 단어(식별자/숫자열)로 만든다.
-// '/'나 ';', '=', NEWLINE 전까지 글자만 모음.
+/**
+ * @brief 모스 부호 디코딩으로 얻은 연속된 문자를 하나의 단어(식별자/숫자열)로 만듬
+ * @return 단어가 하나라도 있으면 true, 아니면 false.
+ */
 static bool parse_word(Parser* ps, char* out, int outsz) {
     int n = 0;
     while (ps->cur.kind == TK_LETTER) {
@@ -19,19 +31,37 @@ static bool parse_word(Parser* ps, char* out, int outsz) {
     return n > 0;
 }
 
+/**
+ * @brief 문장 사이의 구분자(개행, 슬래시)를 스킵
+ */
 static void skip_separators(Parser* ps) {
     while (ps->cur.kind == TK_NEWLINE || ps->cur.kind == TK_SLASH) advance(ps);
 }
 
+/**
+ * @brief 현재 단어가 키워드(kw)와 일치하는지 확인
+ */
 static bool is_kw(const char* w, const char* kw) {
     return strcmp(w, kw) == 0;
 }
 
+
+//========================================
+// Initialization
+//========================================
+
+/**
+ * @brief Parser를 초기화 및 첫 번째 토큰을 읽어옴
+ */
 void ps_init(Parser* ps, Lexer* lx) {
     ps->lx = lx;
     ps->cur = lx_next(lx);
 }
 
+
+//========================================
+// Expression Building Helpers
+//========================================
 static bool expr_push_number(Parser* ps, Expr* expr, int32_t value) {
     if (expr->count >= MAX_EXPR_ITEMS) {
         diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expression too long");
@@ -66,6 +96,15 @@ static bool expr_push_op(Parser* ps, Expr* expr, ExprOp op) {
     return true;
 }
 
+
+//========================================
+// Expression Parsing Levels
+//========================================
+
+/**
+ * @brief 가장 낮은 우선순위: 숫자 리터럴 또는 변수(식별자)를 파싱
+ * @return 성공 시 true, 실패 시 false.
+ */
 static bool parse_factor(Parser* ps, Expr* expr) {
     skip_separators(ps);
     if (ps->cur.kind != TK_LETTER) {
@@ -88,16 +127,51 @@ static bool parse_factor(Parser* ps, Expr* expr) {
     return expr_push_var(ps, expr, word);
 }
 
+/**
+ * @brief 중간 우선순위: 곱셈('*'), 나머지('%') 연산을 처리(Term)
+ *
+ * 파서에게 RPN 스타일로 연산자를 피연산자 뒤에 배치하도록 지시
+ */
+static bool parse_term(Parser* ps, Expr* expr) {
+    // Expression은 Term으로 시작 (Term은 *, % 처리를 포함)
+    if (!parse_factor(ps, expr)) return false;
+
+    for (;;) {
+        skip_separators(ps);
+        if (ps->cur.kind == TK_STAR || ps->cur.kind == TK_PERCENT) {
+            TokenKind op_kind = ps->cur.kind;
+            advance(ps);
+
+            // 다음 Term을 파싱하고 푸시 (수정된 부분)
+            if (!parse_factor(ps, expr)) return false;
+
+            // 연산자 푸시 (RPN 스타일)
+            ExprOp op;
+            if (op_kind == TK_STAR) op = EXPR_OP_MUL;
+            else op = EXPR_OP_MOD;
+
+            if (!expr_push_op(ps, expr, op)) return false;
+        } else {
+            break;
+        }
+    }
+    return true;
+}
+
+/**
+ * @brief 가장 낮은 우선순위: 덧셈('+'), 뺄셈('-') 연산을 처리(Expression)
+ * Term을 기반으로 연산을 수행
+ */
 static bool parse_expr(Parser* ps, Expr* expr) {
     expr->count = 0;
-    if (!parse_factor(ps, expr)) return false;
+    if (!parse_term(ps, expr)) return false;
 
     for (;;) {
         skip_separators(ps);
         if (ps->cur.kind == TK_PLUS || ps->cur.kind == TK_MINUS) {
             TokenKind op_kind = ps->cur.kind;
             advance(ps);
-            if (!parse_factor(ps, expr)) return false;
+            if (!parse_term(ps, expr)) return false;
             ExprOp op = (op_kind == TK_PLUS) ? EXPR_OP_ADD : EXPR_OP_SUB;
             if (!expr_push_op(ps, expr, op)) return false;
         } else {
@@ -107,22 +181,45 @@ static bool parse_expr(Parser* ps, Expr* expr) {
     return true;
 }
 
-// PRINT <expr> ;
+
+//========================================
+// Statement Parsers
+//========================================
+
+/**
+ * @brief PRINT <expr | string> ; 문장을 파싱
+ */
 static bool parse_print(Parser* ps, Stmt* out) {
-    out->kind = STMT_PRINT;
     out->line = ps->cur.line; out->col = ps->cur.col;
-    if (!parse_expr(ps, &out->printStmt.expr)) return false;
+    skip_separators(ps);
+
+    // 문자열 출력 (STMT_PRINT_STR - TK_STRING 토큰 사용)
+    if (ps->cur.kind == TK_STRING) {
+        out->kind = STMT_PRINT_STR;
+        strncpy(out->printStrStmt.text, ps->cur.text, sizeof(out->printStrStmt.text));
+        out->printStrStmt.text[sizeof(out->printStrStmt.text)-1] = '\0';
+        advance(ps);
+    }
+
+    // 정수 출력 (STMT_PRINT - 표현식 파싱)
+    else {
+        out->kind = STMT_PRINT;
+        if (!parse_expr(ps, &out->printStmt.expr)) return false;
+    }
 
     skip_separators(ps);
     if (ps->cur.kind != TK_SEMI) {
         diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "missing ';' after PRINT");
         return false;
     }
+
     advance(ps);
     return true;
 }
 
-// VAR name (= expr)? ;
+/**
+ * @brief VAR name (= expr)? ; 문장을 파싱
+ */
 static bool parse_var(Parser* ps, Stmt* out) {
     out->kind = STMT_VAR;
     out->varStmt.name[0] = '\0';
@@ -134,9 +231,13 @@ static bool parse_var(Parser* ps, Stmt* out) {
         diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "expected identifier after VAR");
         return false;
     }
+
+    // 변수 이름 파싱
     if (!parse_word(ps, out->varStmt.name, sizeof(out->varStmt.name))) return false;
 
     skip_separators(ps);
+
+    // 할당 연산자 '=' 파싱(선택)
     if (ps->cur.kind == TK_EQ) {
         advance(ps);
         if (!parse_expr(ps, &out->varStmt.value_expr)) return false;
@@ -144,6 +245,8 @@ static bool parse_var(Parser* ps, Stmt* out) {
     }
 
     skip_separators(ps);
+
+    // 구문 종결자 ';' 파싱
     if (ps->cur.kind != TK_SEMI) {
         diag_error(ps->lx->filename, ps->cur.line, ps->cur.col, "missing ';' after VAR statement");
         return false;
@@ -152,6 +255,15 @@ static bool parse_var(Parser* ps, Stmt* out) {
     return true;
 }
 
+
+//========================================
+// Main Parsing Loop
+//========================================
+
+/**
+ * @brief 다음 문장을 파싱하고 해당 Stmt 구조체 삽입
+ * @return EOF가 아니면 true, 파일 끝이면 false.
+ */
 bool ps_next_stmt(Parser* ps, Stmt* out) {
     skip_separators(ps);
     if (ps->cur.kind == TK_EOF) return false;

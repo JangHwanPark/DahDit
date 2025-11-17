@@ -1,5 +1,9 @@
+//========================================
+// System Includes
+//========================================
 #include "symtab.h"
 #include <string.h>
+
 
 void st_init(SymTab* st) {
     memset(st, 0, sizeof(*st));
